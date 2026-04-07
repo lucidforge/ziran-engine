@@ -1,0 +1,16 @@
+nihao 你好
+nihao 你号
+zhongguo 中国
+zhongguo 种果
+shijie 世界
+shijie 时节
+beijing 北京
+tianqi 天气
+xiexie 谢谢
+mingtian 明天
+jintian 今天
+gongzuo 工作
+xuexi 学习
+pengyou 朋友
+zhongwen 中文
+yingwen 英文
