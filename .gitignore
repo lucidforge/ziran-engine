@@ -1,3 +1,7 @@
 /target
 **/*.rs.bk
 Cargo.lock
+
+# Dictionary files (large, download separately)
+data/*.txt
+data/*.yaml
