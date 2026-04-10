@@ -9,7 +9,7 @@
 ### 已实现
 
 - [x] 模块化架构：Engine / Context / Pipeline / Segmentor / Translator
-- [x] 拼音自动切分（贪心最长匹配，如 `nihao` → `ni` + `hao`）
+- [x] 拼音自动切分（DP 最优匹配，考虑词库权重，如 `xian` → `西安` 而非 `贤`）
 - [x] 多词表加载（base、ext、others、en、en_ext）
 - [x] 短语优先匹配 + 单字组合生成
 - [x] 英文单词输入
@@ -18,7 +18,7 @@
 
 ### 计划中
 
-- [ ] DP 最优切分（处理歧义场景如 `xian` → `xi'an` / `xian`）
+- [x] DP 最优切分（处理歧义场景如 `xian` → `西安` / `贤`）
 - [ ] Trie 前缀匹配 / 输入时补全
 - [ ] 用户词频学习
 - [ ] Bigram / N-gram 语言模型
@@ -101,7 +101,7 @@ cargo run
 | Engine | `src/engine.rs` | 引擎入口，协调各组件 |
 | Context | `src/context.rs` | 共享上下文，存储输入、分段、候选 |
 | Pipeline | `src/pipeline.rs` | 处理管线，串联分段→翻译→排序 |
-| Segmentor | `src/segmentor.rs` | 拼音分段器（贪心最长匹配） |
+| Segmentor | `src/segmentor.rs` | 拼音分段器（DP 最优匹配） |
 | Translator | `src/translator.rs` | 翻译器，多词表索引 + 短语优先 + 组合生成 |
 | Segment | `src/segment.rs` | 分段数据结构 |
 | Candidate | `src/candidate.rs` | 候选词数据结构 |
@@ -112,7 +112,7 @@ cargo run
 
 | 文件 | 说明 |
 |------|------|
-| `dict.txt` | base 基础词库（两字词为主） |
+| `base.dict.yaml` | base 基础词库（两字词为主） |
 | `ext.dict.yaml` | 扩展词库（多音字注音、长词） |
 | `others.dict.yaml` | 容错词库（口语读音、异读） |
 | `en.dict.yaml` | 英文词库（~20k 单词） |
@@ -155,7 +155,7 @@ Tab 分隔两列：
 
 - [x] 拼音自动切分
 - [x] 多词表加载
-- [ ] DP 最优切分
+- [x] DP 最优切分
 - [ ] 用户词频学习
 
 ### Phase 2：工程化

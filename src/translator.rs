@@ -2,16 +2,15 @@ use std::collections::HashMap;
 use std::fs;
 
 use crate::candidate::Candidate;
-use crate::segment::Segment;
 
-struct DictEntry {
-    word: String,
-    weight: u32,
+pub struct DictEntry {
+    pub word: String,
+    pub weight: u32,
 }
 
 pub struct SimpleTranslator {
-    phrase_index: HashMap<String, Vec<DictEntry>>,
-    char_index: HashMap<String, Vec<DictEntry>>,
+    pub phrase_index: HashMap<String, Vec<DictEntry>>,
+    pub char_index: HashMap<String, Vec<DictEntry>>,
     en_index: HashMap<String, Vec<DictEntry>>,
 }
 
@@ -21,7 +20,7 @@ impl SimpleTranslator {
         let mut char_index = HashMap::new();
 
         let cn_files = [
-            "data/dict.txt",
+            "data/base.dict.yaml",
             "data/ext.dict.yaml",
             "data/others.dict.yaml",
         ];
@@ -183,18 +182,6 @@ impl SimpleTranslator {
         result
     }
 
-    pub fn translate_segment(&self, seg: &Segment) -> Vec<Candidate> {
-        let mut result = Vec::new();
-
-        if let Some(entries) = self.char_index.get(&seg.code) {
-            for entry in entries {
-                result.push(Candidate::new(entry.word.clone(), entry.weight as f32));
-            }
-        }
-
-        result
-    }
-
     pub fn translate_en(&self, input: &str) -> Vec<Candidate> {
         let mut result = Vec::new();
 
@@ -205,12 +192,5 @@ impl SimpleTranslator {
         }
 
         result
-    }
-
-    pub fn get_char_candidates(&self, syllable: &str) -> Vec<(String, u32)> {
-        self.char_index
-            .get(syllable)
-            .map(|entries| entries.iter().map(|e| (e.word.clone(), e.weight)).collect())
-            .unwrap_or_default()
     }
 }
