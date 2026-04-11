@@ -1,4 +1,6 @@
 use crate::context::Context;
+use crate::dict::load_dictionaries;
+use crate::schema::SchemaConfig;
 use crate::pipeline::Pipeline;
 
 pub struct Engine {
@@ -8,7 +10,10 @@ pub struct Engine {
 
 impl Engine {
     pub fn new() -> Self {
-        let pipeline = Pipeline::new();
+        let schema = SchemaConfig::load("data/default.yaml")
+            .expect("failed to load schema");
+        let dicts = load_dictionaries(&schema);
+        let pipeline = Pipeline::with_dictionaries(&dicts);
         let context = Context::new();
         Self { context, pipeline }
     }

@@ -1,7 +1,9 @@
 mod candidate;
 mod context;
+mod dict;
 mod engine;
 mod pipeline;
+mod schema;
 mod segment;
 mod segmentor;
 mod translator;

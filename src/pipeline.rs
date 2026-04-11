@@ -1,5 +1,6 @@
 use crate::candidate::Candidate;
 use crate::context::Context;
+use crate::dict::LoadedDictionaries;
 use crate::segmentor::PinyinSegmentor;
 use crate::translator::SimpleTranslator;
 
@@ -9,10 +10,13 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    pub fn new() -> Self {
+    pub fn with_dictionaries(dicts: &LoadedDictionaries) -> Self {
         Self {
-            segmentor: PinyinSegmentor::new(),
-            translator: SimpleTranslator::new(),
+            segmentor: PinyinSegmentor::with_syllables(
+                dicts.syllables.clone(),
+                dicts.max_syllable_len,
+            ),
+            translator: SimpleTranslator::from_loaded_dictionaries(dicts),
         }
     }
 

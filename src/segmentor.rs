@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use std::fs;
 
 use crate::context::Context;
 use crate::segment::Segment;
@@ -11,59 +10,9 @@ pub struct PinyinSegmentor {
 }
 
 impl PinyinSegmentor {
-    pub fn new() -> Self {
-        let mut syllables = HashSet::new();
-        let mut max_len: usize = 0;
-
-        let cn_files = [
-            "data/base.dict.yaml",
-            "data/ext.dict.yaml",
-            "data/others.dict.yaml",
-        ];
-
-        for file in &cn_files {
-            let (s, m) = Self::load_syllables(file);
-            syllables.extend(s);
-            if m > max_len {
-                max_len = m;
-            }
-        }
-
+    /// Create segmentor with pre-loaded syllables (used by Pipeline with LoadedDictionaries)
+    pub fn with_syllables(syllables: HashSet<String>, max_len: usize) -> Self {
         Self { syllables, max_len }
-    }
-
-    fn load_syllables(path: &str) -> (HashSet<String>, usize) {
-        let mut syllables: HashSet<String> = HashSet::new();
-        let mut max_len: usize = 0;
-
-        let content = match fs::read_to_string(path) {
-            Ok(c) => c,
-            Err(_) => return (syllables, max_len),
-        };
-
-        for line in content.lines() {
-            let line = line.trim();
-            if line.is_empty() || line.starts_with('#') {
-                continue;
-            }
-
-            let parts: Vec<&str> = line.split('\t').collect();
-            if parts.len() != 3 {
-                continue;
-            }
-
-            let pinyin_str = parts[1];
-            let pinyin_parts: Vec<&str> = pinyin_str.split_whitespace().collect();
-
-            for syl in pinyin_parts {
-                if syl.len() > max_len {
-                    max_len = syl.len();
-                }
-                syllables.insert(syl.to_string());
-            }
-        }
-
-        (syllables, max_len)
     }
 
     /// DP optimal segmentation — considers phrase weights to find globally optimal path.
@@ -96,9 +45,8 @@ impl PinyinSegmentor {
                 continue;
             }
 
-            // 1. Try phrase_index matches starting at position i
-            let max_check = (n - i).min(self.max_len);
-            for len in 1..=max_check {
+            // 1. Try phrase_index matches starting at position i (no length limit)
+            for len in 1..=n - i {
                 let key = &input[i..i + len];
 
                 if let Some(entries) = translator.phrase_index.get(key) {
@@ -119,7 +67,8 @@ impl PinyinSegmentor {
 
             // 2. Fallback: try char_index via valid syllable
             if backptr[i].is_none() {
-                for len in (1..=max_check).rev() {
+                let max_char_len = (n - i).min(self.max_len);
+                for len in (1..=max_char_len).rev() {
                     if i + len > n {
                         continue;
                     }
