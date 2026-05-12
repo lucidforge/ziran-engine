@@ -22,12 +22,14 @@ Engine → Pipeline → [build_dag → beam_search → backtrack → finalize] �
 ```
 
 ### Pipeline Flow
-1. **Pass 1 (phrases)** — build_dag from phrase_trie (base+ext+others) → beam_search → backtrack
-2. **Pass 2 (fallback)** — if no phrase candidates, build_dag from char_trie (8105) → beam_search → backtrack
-3. **English fallback** — if no Chinese candidates, prefix match from en_trie
-4. **finalize** — deduplicate, apply user frequency boost, annotate with bilingual translations, sort
+1. **Input normalization** — strip whitespace (supports "ni hao" style input)
+2. **Phrase search** — build_dag from phrase_trie → beam_search → backtrack
+3. **Merge fallback** — if phrase_trie has partial coverage, merge char_trie edges to fill gaps
+4. **Char fallback** — if no phrase candidates at all, search char_trie alone
+5. **English fallback** — if no Chinese candidates, prefix match from en_trie
+6. **finalize** — deduplicate, apply user frequency boost, annotate with bilingual translations, sort
 
-Single-char dictionary (8105) is kept in a separate trie so high-frequency characters don't overwhelm phrase candidates in beam search.
+Single-char dictionary (8105) is in a separate trie so high-frequency characters don't overwhelm phrases in beam search. Config: `translator.char_dictionaries` in default.yaml.
 
 ### Module Responsibilities
 
@@ -53,7 +55,8 @@ Dictionary files referenced in `data/default.yaml` under `translator.dictionarie
 ## Current Features
 
 - Trie-based DAG construction (O(n×m) instead of O(n×K))
-- Beam search with log-weight scoring and normalized segment penalty
+- Log-space beam search + librime-style quality scoring (exp(avg_log_weight) + quality_len_bonus)
+- Two-trie architecture: phrases first, single chars as fallback
 - Binary dict cache with FNV checksum for fast startup
 - User frequency learning (persisted to `data/user_freq.tsv`)
 - Bilingual annotations (Chinese→English translations)
