@@ -19,6 +19,7 @@ pub type BilingualIndex = HashMap<String, Vec<(String, u32)>>;
 
 pub struct LoadedDictionaries {
     pub phrase_trie: Arc<Trie<DictCandidate>>,
+    pub char_trie: Arc<Trie<DictCandidate>>,
     pub en_trie: Arc<Trie<DictCandidate>>,
     pub bilingual_index: Arc<BilingualIndex>,
 }
@@ -26,6 +27,11 @@ pub struct LoadedDictionaries {
 pub fn load_dictionaries(schema: &SchemaConfig) -> LoadedDictionaries {
     let chinese_paths: Vec<String> = schema
         .dictionaries
+        .iter()
+        .map(|name| resolve_dict_path(name))
+        .collect();
+    let char_paths: Vec<String> = schema
+        .char_dictionaries
         .iter()
         .map(|name| resolve_dict_path(name))
         .collect();
@@ -38,6 +44,11 @@ pub fn load_dictionaries(schema: &SchemaConfig) -> LoadedDictionaries {
     let phrase_trie = Arc::new(load_trie_with_cache(
         &chinese_paths,
         "data/cache_zh.bin",
+        parse_chinese_dicts,
+    ));
+    let char_trie = Arc::new(load_trie_with_cache(
+        &char_paths,
+        "data/cache_char.bin",
         parse_chinese_dicts,
     ));
     let en_trie = Arc::new(load_trie_with_cache(
@@ -55,6 +66,7 @@ pub fn load_dictionaries(schema: &SchemaConfig) -> LoadedDictionaries {
 
     LoadedDictionaries {
         phrase_trie,
+        char_trie,
         en_trie,
         bilingual_index,
     }
@@ -70,9 +82,6 @@ fn resolve_dict_path(name: &str) -> String {
 
 // ── Generic dict file parser ──────────────────────────────────────────
 
-/// Parse a dict.yaml file, calling `line_handler` for each valid TSV line.
-/// Handles file reading, comment/header skipping, and tab splitting.
-/// `line_handler` receives (word, code, weight) and should return `Some(T)` to keep the line.
 fn parse_dict_file<T, F>(path: &str, mut line_handler: F) -> Vec<T>
 where
     F: FnMut(&str, &str, u32) -> Option<T>,

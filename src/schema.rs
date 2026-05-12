@@ -2,6 +2,7 @@ use std::fs;
 
 pub struct SchemaConfig {
     pub dictionaries: Vec<String>,
+    pub char_dictionaries: Vec<String>,
     pub english_dictionaries: Vec<String>,
     pub bilingual_dictionaries: Vec<String>,
 }
@@ -12,6 +13,7 @@ impl SchemaConfig {
             .map_err(|e| format!("failed to read schema '{}': {}", path, e))?;
 
         let mut dictionaries = Vec::new();
+        let mut char_dictionaries = Vec::new();
         let mut english_dictionaries = Vec::new();
         let mut bilingual_dictionaries = Vec::new();
         let mut current_section = String::new();
@@ -56,6 +58,10 @@ impl SchemaConfig {
                 if current_section == "translator" && current_list == "dictionaries" {
                     dictionaries.push(item.to_string());
                 } else if current_section == "translator"
+                    && current_list == "char_dictionaries"
+                {
+                    char_dictionaries.push(item.to_string());
+                } else if current_section == "translator"
                     && current_list == "english_dictionaries"
                 {
                     english_dictionaries.push(item.to_string());
@@ -73,6 +79,7 @@ impl SchemaConfig {
 
         Ok(Self {
             dictionaries,
+            char_dictionaries,
             english_dictionaries,
             bilingual_dictionaries,
         })

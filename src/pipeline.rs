@@ -5,15 +5,14 @@ use crate::dict::{BilingualIndex, DictCandidate, LoadedDictionaries};
 use crate::trie::{DagEdge, Trie};
 use crate::user_freq::UserFreq;
 
-const BEAM_WIDTH: usize = 12;
-const SEGMENT_PENALTY: f32 = 3.0;
-const UNKNOWN_WORD_PENALTY: f32 = -100.0;
-const SCORE_EXPONENT: f32 = 0.8;
+const BEAM_WIDTH: usize = 24;
+const QUALITY_LEN_BONUS: f64 = 50.0;
+const UNKNOWN_WORD_PENALTY: f64 = -1e8;
 const MAX_CANDIDATES: usize = 50;
 
 struct PathState {
-    score: f32,
-    raw_score: f32,
+    score: f64,
+    raw_score: f64,
     prev_node: usize,
     prev_state_idx: usize,
     word_text: String,
@@ -22,6 +21,7 @@ struct PathState {
 
 pub struct Pipeline {
     phrase_trie: Arc<Trie<DictCandidate>>,
+    char_trie: Arc<Trie<DictCandidate>>,
     en_trie: Arc<Trie<DictCandidate>>,
     bilingual_index: Arc<BilingualIndex>,
 }
@@ -30,57 +30,46 @@ impl Pipeline {
     pub fn with_dictionaries(dicts: &LoadedDictionaries) -> Self {
         Self {
             phrase_trie: Arc::clone(&dicts.phrase_trie),
+            char_trie: Arc::clone(&dicts.char_trie),
             en_trie: Arc::clone(&dicts.en_trie),
             bilingual_index: Arc::clone(&dicts.bilingual_index),
         }
     }
 
     /// Run the full pipeline: input pinyin → candidates.
+    /// Two-pass: phrases first, single chars as fallback.
     pub fn run(&self, input: &str, user_freq: &UserFreq) -> Vec<Candidate> {
         if input.is_empty() {
             return Vec::new();
         }
 
-        // 1. Build DAG
-        let edges = build_dag(input, &self.phrase_trie);
+        // Pass 1: Search phrase trie (base + ext + others)
+        let phrase_edges = build_dag(input, &self.phrase_trie);
+        let phrase_dp = beam_search(input.len(), &phrase_edges);
+        let mut cands = backtrack(input.len(), &phrase_dp);
 
-        // 2. English fallback if no full Chinese coverage
-        if let Some(en_cands) = self.try_english_fallback(input, &edges) {
-            return en_cands;
+        // Pass 2: If no phrase candidates, fall back to char trie (8105)
+        if cands.is_empty() {
+            let char_edges = build_dag(input, &self.char_trie);
+            let char_dp = beam_search(input.len(), &char_edges);
+            cands = backtrack(input.len(), &char_dp);
         }
 
-        // 3. Beam search
-        let dp = beam_search(input.len(), &edges);
+        // English fallback if no Chinese candidates at all
+        if cands.is_empty() {
+            let en_cands = english_prefix_match(&self.en_trie, &input.to_lowercase());
+            if !en_cands.is_empty() {
+                return en_cands;
+            }
+        }
 
-        // 4. Backtrack to produce candidates
-        let mut cands = backtrack(input.len(), &dp);
-
-        // 5. Deduplicate, apply boosts, annotate, sort
+        // Deduplicate, apply boosts, annotate, sort
         finalize(&mut cands, user_freq, &self.bilingual_index);
         cands.into_iter().map(|(c, _)| c).collect()
     }
-
-    /// Try English fallback. Returns Some if English should be used instead of Chinese.
-    fn try_english_fallback(&self, input: &str, edges: &[DagEdge]) -> Option<Vec<Candidate>> {
-        let n = input.len();
-        let has_chinese_path = edges.iter().any(|e| e.words.iter().any(|(_, w)| *w > 0));
-        let all_covered = (0..n).all(|i| {
-            edges
-                .iter()
-                .any(|e| e.from <= i && i < e.to && e.words.iter().any(|(_, w)| *w > 0))
-        });
-
-        if !all_covered || !has_chinese_path {
-            let en_cands = english_prefix_match(&self.en_trie, &input.to_lowercase());
-            if !en_cands.is_empty() {
-                return Some(en_cands);
-            }
-        }
-        None
-    }
 }
 
-// ── DAG construction (inlined from segmentor) ────────────────────────
+// ── DAG construction ──────────────────────────────────────────────────
 
 fn build_dag(input: &str, trie: &Trie<DictCandidate>) -> Vec<DagEdge> {
     let mut edges = Vec::new();
@@ -106,7 +95,7 @@ fn build_dag(input: &str, trie: &Trie<DictCandidate>) -> Vec<DagEdge> {
     edges
 }
 
-// ── Beam search ──────────────────────────────────────────────────────
+// ── Beam search (log-space, like librime's compiled weights) ──────────
 
 fn beam_search(n: usize, edges: &[DagEdge]) -> Vec<Vec<PathState>> {
     let start = PathState {
@@ -138,15 +127,13 @@ fn beam_search(n: usize, edges: &[DagEdge]) -> Vec<Vec<PathState>> {
                     let word_score = if *weight == 0 {
                         UNKNOWN_WORD_PENALTY
                     } else {
-                        (*weight as f32).ln()
+                        (*weight as f64).ln()
                     };
                     let new_seg_count = state.segment_count + 1;
                     let raw_score = state.raw_score + word_score;
-                    let score = (raw_score - SEGMENT_PENALTY * new_seg_count as f32)
-                        / (new_seg_count as f32).powf(SCORE_EXPONENT);
 
                     next_states.push(PathState {
-                        score,
+                        score: raw_score,
                         raw_score,
                         prev_node: i,
                         prev_state_idx: state_idx,
@@ -168,10 +155,22 @@ fn beam_search(n: usize, edges: &[DagEdge]) -> Vec<Vec<PathState>> {
     dp
 }
 
-// ── Backtrack ────────────────────────────────────────────────────────
+// ── Backtrack + librime-style quality ─────────────────────────────────
+
+fn safe_exp(x: f64) -> f64 {
+    if x > 500.0 {
+        f64::MAX
+    } else if x < -500.0 {
+        0.0
+    } else {
+        x.exp()
+    }
+}
 
 fn backtrack(n: usize, dp: &[Vec<PathState>]) -> Vec<(Candidate, u32)> {
-    let mut cands: Vec<(Candidate, u32)> = Vec::new();
+    let mut phrases: Vec<(Candidate, u32)> = Vec::new();
+    let mut single_chars: Vec<(Candidate, u32)> = Vec::new();
+    let input_len = n.max(1) as f64;
 
     if let Some(final_states) = dp.last() {
         for state in final_states.iter() {
@@ -197,13 +196,28 @@ fn backtrack(n: usize, dp: &[Vec<PathState>]) -> Vec<(Candidate, u32)> {
 
             let text: String = segments.concat();
             let has_ascii_letter = text.chars().any(|c| c.is_ascii_alphabetic());
-            if !text.is_empty() && !has_ascii_letter {
-                cands.push((Candidate::new(text, state.score), state.segment_count));
+            if text.is_empty() || has_ascii_letter {
+                continue;
+            }
+
+            // librime quality: exp(avg_log_weight) + quality_len_bonus * (matched_chars / input_len)
+            let matched_chars = text.chars().count().max(1) as f64;
+            let avg_log_weight = state.raw_score / state.segment_count as f64;
+            let quality = safe_exp(avg_log_weight) + QUALITY_LEN_BONUS * (matched_chars / input_len);
+
+            let cand = (Candidate::new(text, quality as f32), state.segment_count);
+            let is_all_single = segments.iter().all(|s| s.chars().count() == 1);
+            if is_all_single {
+                single_chars.push(cand);
+            } else {
+                phrases.push(cand);
             }
         }
     }
 
-    cands
+    // Phrases always rank above single chars
+    phrases.extend(single_chars);
+    phrases
 }
 
 // ── English prefix match ─────────────────────────────────────────────

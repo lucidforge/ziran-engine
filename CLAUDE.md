@@ -22,11 +22,12 @@ Engine → Pipeline → [build_dag → beam_search → backtrack → finalize] �
 ```
 
 ### Pipeline Flow
-1. **build_dag** — Trie-based prefix matching builds a DAG of all possible syllable edges
-2. **try_english_fallback** — if Chinese doesn't fully cover input, try English prefix match
-3. **beam_search** — log-weight scoring with segment penalty finds optimal path
-4. **backtrack** — extract candidate strings from the best beam paths
-5. **finalize** — deduplicate, apply user frequency boost, annotate with bilingual translations, sort
+1. **Pass 1 (phrases)** — build_dag from phrase_trie (base+ext+others) → beam_search → backtrack
+2. **Pass 2 (fallback)** — if no phrase candidates, build_dag from char_trie (8105) → beam_search → backtrack
+3. **English fallback** — if no Chinese candidates, prefix match from en_trie
+4. **finalize** — deduplicate, apply user frequency boost, annotate with bilingual translations, sort
+
+Single-char dictionary (8105) is kept in a separate trie so high-frequency characters don't overwhelm phrase candidates in beam search.
 
 ### Module Responsibilities
 
