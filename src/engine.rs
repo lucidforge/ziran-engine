@@ -1,13 +1,13 @@
-use crate::context::Context;
+use crate::candidate::Candidate;
 use crate::dict::load_dictionaries;
 use crate::pipeline::Pipeline;
 use crate::schema::SchemaConfig;
 use crate::user_freq::UserFreq;
 
 pub struct Engine {
-    pub context: Context,
     pipeline: Pipeline,
     pub user_freq: UserFreq,
+    pub candidates: Vec<Candidate>,
 }
 
 impl Engine {
@@ -16,17 +16,16 @@ impl Engine {
             SchemaConfig::load("data/default.yaml").expect("failed to load schema");
         let dicts = load_dictionaries(&schema);
         let pipeline = Pipeline::with_dictionaries(&dicts);
-        let context = Context::new();
         let user_freq = UserFreq::load("data/user_freq.tsv");
         Self {
-            context,
             pipeline,
             user_freq,
+            candidates: Vec::new(),
         }
     }
 
-    pub fn run_pipeline(&mut self) {
-        self.pipeline.run(&mut self.context, &self.user_freq);
+    pub fn run_pipeline(&mut self, input: &str) {
+        self.candidates = self.pipeline.run(input, &self.user_freq);
     }
 
     pub fn record_selection(&mut self, text: &str) {

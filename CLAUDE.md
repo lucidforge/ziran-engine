@@ -18,47 +18,45 @@ No lint, test, or typecheck scripts configured yet.
 ## Architecture
 
 ```
-Engine → Pipeline → [Segmentor | Translator] → Sort → Candidates
-              ↓
-           Context (shared state: raw_input → segments → candidates)
+Engine → Pipeline → [build_dag → beam_search → backtrack → finalize] → Candidates
 ```
 
 ### Pipeline Flow
-1. **Segmentor** splits raw pinyin input into syllables (greedy longest-match)
-2. **Translator** looks up phrases first, falls back to per-character lookup
-3. **Combinations** generated from segments if phrase matches are insufficient
-4. **English fallback** if no Chinese candidates found
-5. **Sort** by weight descending, truncate to 50 candidates
+1. **build_dag** — Trie-based prefix matching builds a DAG of all possible syllable edges
+2. **try_english_fallback** — if Chinese doesn't fully cover input, try English prefix match
+3. **beam_search** — log-weight scoring with segment penalty finds optimal path
+4. **backtrack** — extract candidate strings from the best beam paths
+5. **finalize** — deduplicate, apply user frequency boost, annotate with bilingual translations, sort
 
 ### Module Responsibilities
 
 | Module | File | Role |
 |--------|------|------|
-| Engine | `src/engine.rs` | Owns Context + Pipeline, entry point |
-| Context | `src/context.rs` | Shared state: raw_input, segments, candidates |
-| Pipeline | `src/pipeline.rs` | Orchestration: segment → translate → combine → sort |
-| PinyinSegmentor | `src/segmentor.rs` | Greedy longest-match syllable splitting |
-| SimpleTranslator | `src/translator.rs` | HashMap-based phrase/char/en lookup |
-| Segment | `src/segment.rs` | Pinyin syllable container |
-| Candidate | `src/candidate.rs` | Result item with text + score |
+| Engine | `src/engine.rs` | Owns Pipeline + UserFreq, entry point |
+| Pipeline | `src/pipeline.rs` | DAG → beam search → backtrack → finalize |
+| Trie | `src/trie.rs` | Generic `Trie<V>` for O(n×m) prefix matching |
+| Dict | `src/dict.rs` | YAML dict loading, builds `Arc<Trie>` + bilingual index |
+| DictCompiler | `src/dict_compiler.rs` | Binary cache (ZIRC format) for fast startup |
+| UserFreq | `src/user_freq.rs` | User selection frequency tracking (TSV) |
+| Candidate | `src/candidate.rs` | Result item: text + score + optional annotation |
+| Schema | `src/schema.rs` | YAML schema config loader |
 
-## Dictionary Loading
+## Dictionary Format
 
-The translator loads multiple dictionary files at startup:
-- Chinese: `data/dict.txt`, `data/ext.dict.yaml`, `data/others.dict.yaml`
-- English: `data/en.dict.yaml`, `data/en_ext.dict.yaml`
+**Chinese** (tab-separated): `词语\t拼音1 拼音2\t权重`
+**English** (tab-separated): `单词\t单词\t权重`
+**Bilingual** (tab-separated): `中文\t英文\t权重`
 
-**Chinese format** (tab-separated): `词语\t拼音1 拼音2\t权重`
-**English format** (tab-separated): `单词\t单词\t权重`
+Dictionary files referenced in `data/default.yaml` under `translator.dictionaries`.
 
-The segmentor loads syllables from the same Chinese dictionary files to build its pinyin set.
+## Current Features
 
-## Current Limitations
-
-- Greedy (not DP) segmentation — cannot handle ambiguous cases like `xian` → `xi'an` vs `xian`
-- Exact match only (HashMap) — no trie/prefix matching
-- No user frequency learning or n-gram scoring
-- No unit tests yet
+- Trie-based DAG construction (O(n×m) instead of O(n×K))
+- Beam search with log-weight scoring and normalized segment penalty
+- Binary dict cache with FNV checksum for fast startup
+- User frequency learning (persisted to `data/user_freq.tsv`)
+- Bilingual annotations (Chinese→English translations)
+- English fallback input
 
 ## Git Conventions
 

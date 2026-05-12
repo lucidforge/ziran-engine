@@ -1,23 +1,21 @@
 use std::collections::HashMap;
 
-use crate::dict::DictCandidate;
-
 pub struct DagEdge {
     pub from: usize,
     pub to: usize,
     pub words: Vec<(String, u32)>,
 }
 
-struct TrieNode {
-    children: HashMap<u8, TrieNode>,
-    entries: Vec<DictCandidate>,
+struct TrieNode<V> {
+    children: HashMap<u8, TrieNode<V>>,
+    entries: Vec<V>,
 }
 
-pub struct Trie {
-    root: TrieNode,
+pub struct Trie<V> {
+    root: TrieNode<V>,
 }
 
-impl TrieNode {
+impl<V> TrieNode<V> {
     fn new() -> Self {
         Self {
             children: HashMap::new(),
@@ -26,14 +24,14 @@ impl TrieNode {
     }
 }
 
-impl Trie {
+impl<V> Trie<V> {
     pub fn new() -> Self {
         Self {
             root: TrieNode::new(),
         }
     }
 
-    pub fn insert(&mut self, key: &str, entry: DictCandidate) {
+    pub fn insert(&mut self, key: &str, entry: V) {
         let mut node = &mut self.root;
         for byte in key.bytes() {
             node = node.children.entry(byte).or_insert_with(TrieNode::new);
@@ -41,9 +39,12 @@ impl Trie {
         node.entries.push(entry);
     }
 
-    /// Build DAG edges starting at position `start` in `text`.
-    /// Walks the trie from root, collecting edges at every terminal node.
-    pub fn collect_prefixes(&self, text: &str, start: usize) -> Vec<DagEdge> {
+    /// Walk the trie from `text[start]`, calling `to_edge` at each terminal node.
+    /// Returns collected edges.
+    pub fn collect_prefixes<F>(&self, text: &str, start: usize, to_edge: F) -> Vec<DagEdge>
+    where
+        F: Fn(usize, usize, &[V]) -> Option<DagEdge>,
+    {
         let bytes = text.as_bytes();
         let n = bytes.len();
         let mut edges = Vec::new();
@@ -54,16 +55,9 @@ impl Trie {
                 Some(child) => {
                     node = child;
                     if !node.entries.is_empty() {
-                        let words: Vec<(String, u32)> = node
-                            .entries
-                            .iter()
-                            .map(|e| (e.text.clone(), e.weight))
-                            .collect();
-                        edges.push(DagEdge {
-                            from: start,
-                            to: i + 1,
-                            words,
-                        });
+                        if let Some(edge) = to_edge(start, i + 1, &node.entries) {
+                            edges.push(edge);
+                        }
                     }
                 }
                 None => break,
@@ -75,7 +69,7 @@ impl Trie {
 
     /// Collect all entries whose key starts with the given prefix.
     /// Returns (exact_matches, prefix_matches).
-    pub fn prefix_search(&self, prefix: &str) -> (Vec<&DictCandidate>, Vec<&DictCandidate>) {
+    pub fn prefix_search(&self, prefix: &str) -> (Vec<&V>, Vec<&V>) {
         let mut node = &self.root;
         for byte in prefix.bytes() {
             match node.children.get(&byte) {
@@ -83,18 +77,17 @@ impl Trie {
                 None => return (Vec::new(), Vec::new()),
             }
         }
-        // node is now at the end of the prefix
-        let exact: Vec<&DictCandidate> = node.entries.iter().collect();
+        let exact: Vec<&V> = node.entries.iter().collect();
         let mut prefix_matches = Vec::new();
         Self::collect_all(node, &mut prefix_matches);
         (exact, prefix_matches)
     }
 
-    fn collect_all<'a>(node: &'a TrieNode, result: &mut Vec<&'a DictCandidate>) {
-        for entry in &node.entries {
-            result.push(entry);
-        }
+    fn collect_all<'a>(node: &'a TrieNode<V>, result: &mut Vec<&'a V>) {
         for child in node.children.values() {
+            for entry in &child.entries {
+                result.push(entry);
+            }
             Self::collect_all(child, result);
         }
     }

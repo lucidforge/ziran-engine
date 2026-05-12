@@ -1,12 +1,9 @@
 mod candidate;
-mod context;
 mod dict;
 mod dict_compiler;
 mod engine;
 mod pipeline;
 mod schema;
-mod segment;
-mod segmentor;
 mod trie;
 mod user_freq;
 
@@ -33,8 +30,8 @@ fn main() {
 
         // Check if input is a number (candidate selection)
         if let Ok(idx) = input.parse::<usize>() {
-            if idx >= 1 && idx <= engine.context.candidates.len() {
-                let selected_text = engine.context.candidates[idx - 1].text.clone();
+            if idx >= 1 && idx <= engine.candidates.len() {
+                let selected_text = engine.candidates[idx - 1].text.clone();
                 println!("已选择: {}", selected_text);
                 engine.record_selection(&selected_text);
             } else {
@@ -44,12 +41,11 @@ fn main() {
             continue;
         }
 
-        engine.context.raw_input = input.clone();
-        engine.run_pipeline();
+        engine.run_pipeline(&input);
 
         println!("原始输入: {}", input);
         println!("候选结果:");
-        for (i, cand) in engine.context.candidates.iter().enumerate() {
+        for (i, cand) in engine.candidates.iter().enumerate() {
             match &cand.annotation {
                 Some(ann) => println!("  {}. {} ({})", i + 1, cand.text, ann),
                 None => println!("  {}. {}", i + 1, cand.text),

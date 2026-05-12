@@ -35,7 +35,7 @@ pub fn compile_to_cache(path: &str, entries: &[(String, DictCandidate)], checksu
 
 /// Load a Trie from a binary cache file.
 /// Returns None if the file doesn't exist, has invalid format, or checksum mismatch.
-pub fn load_from_cache(path: &str, expected_checksum: u64) -> Option<Trie> {
+pub fn load_from_cache(path: &str, expected_checksum: u64) -> Option<Trie<DictCandidate>> {
     let data = fs::read(path).ok()?;
 
     if data.len() < 17 {
