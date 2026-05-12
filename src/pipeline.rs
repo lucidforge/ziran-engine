@@ -37,25 +37,29 @@ impl Pipeline {
     }
 
     /// Run the full pipeline: input pinyin → candidates.
-    /// Two-pass: phrases first, single chars as fallback.
+    /// Strategy: phrase trie first, merged trie as fallback for partial coverage.
     pub fn run(&self, input: &str, user_freq: &UserFreq) -> Vec<Candidate> {
+        let input: String = input.chars().filter(|c| !c.is_whitespace()).collect();
         if input.is_empty() {
             return Vec::new();
         }
 
-        // Pass 1: Search phrase trie (base + ext + others)
-        let phrase_edges = build_dag(input, &self.phrase_trie);
-        let phrase_dp = beam_search(input.len(), &phrase_edges);
-        let mut cands = backtrack(input.len(), &phrase_dp);
+        // Try phrase trie first
+        let phrase_edges = build_dag(&input, &self.phrase_trie);
+        let full_coverage = has_full_coverage(input.len(), &phrase_edges);
 
-        // Pass 2: If no phrase candidates, fall back to char trie (8105)
-        if cands.is_empty() {
-            let char_edges = build_dag(input, &self.char_trie);
-            let char_dp = beam_search(input.len(), &char_edges);
-            cands = backtrack(input.len(), &char_dp);
-        }
+        let mut cands = if full_coverage {
+            // Phrase trie covers everything — use it alone
+            let dp = beam_search(input.len(), &phrase_edges);
+            backtrack(input.len(), &dp)
+        } else {
+            // Partial coverage — merge both tries so single chars fill gaps
+            let merged = merge_edges(&phrase_edges, &build_dag(&input, &self.char_trie));
+            let dp = beam_search(input.len(), &merged);
+            backtrack(input.len(), &dp)
+        };
 
-        // English fallback if no Chinese candidates at all
+        // English fallback if no Chinese candidates
         if cands.is_empty() {
             let en_cands = english_prefix_match(&self.en_trie, &input.to_lowercase());
             if !en_cands.is_empty() {
@@ -67,6 +71,30 @@ impl Pipeline {
         finalize(&mut cands, user_freq, &self.bilingual_index);
         cands.into_iter().map(|(c, _)| c).collect()
     }
+}
+
+/// Check if the DAG has real (non-UNKNOWN) edges covering every position.
+fn has_full_coverage(n: usize, edges: &[DagEdge]) -> bool {
+    (0..n).all(|i| {
+        edges.iter().any(|e| {
+            e.from <= i
+                && i < e.to
+                && e.words.iter().any(|(_, w)| *w > 0)
+        })
+    })
+}
+
+/// Merge two edge lists, combining words for edges with the same (from, to).
+fn merge_edges(a: &[DagEdge], b: &[DagEdge]) -> Vec<DagEdge> {
+    let mut merged: Vec<DagEdge> = a.to_vec();
+    for edge_b in b {
+        if let Some(existing) = merged.iter_mut().find(|e| e.from == edge_b.from && e.to == edge_b.to) {
+            existing.words.extend(edge_b.words.iter().cloned());
+        } else {
+            merged.push(edge_b.clone());
+        }
+    }
+    merged
 }
 
 // ── DAG construction ──────────────────────────────────────────────────
