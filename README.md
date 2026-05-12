@@ -12,7 +12,7 @@
 - **中英混合输入** — 拼音输入时候选栏显示英文翻译注释
 - **英文前缀匹配** — 输入英文时显示前缀匹配候选
 - **用户词频学习** — 本地记录选词偏好，高频词自动提升排序
-- **零外部依赖** — 仅使用 Rust 标准库（hashbrown + smallvec）
+- **零外部依赖** — 仅使用 Rust 标准库
 
 ## 快速开始
 
@@ -60,7 +60,6 @@ cargo run
 > hello
 候选结果:
   1. hello
-  2. hello
 
 输入数字选择候选，选词记录会自动保存到 data/user_freq.tsv。
 ```
@@ -68,36 +67,28 @@ cargo run
 ## 架构
 
 ```
-用户输入
-    │
-    ▼
-┌─────────────┐
-│   Engine    │  引擎入口，管理 Context + Pipeline + UserFreq
-└──────┬──────┘
-       │
-       ▼
-┌─────────────┐     ┌──────────────┐
-│  Pipeline   │────▶│    Trie      │  DAG 构建 + Beam Search
-└──────┬──────┘     └──────────────┘
-       │
-       ▼
-┌─────────────┐     ┌──────────────┐     ┌──────────────┐
-│  Segmentor  │────▶│  Bilingual   │────▶│  UserFreq    │
-└─────────────┘     └──────────────┘     └──────┬───────┘
-                                                │
-                                                ▼
-                                          候选列表输出
+用户输入 → Engine → Pipeline → Candidates
+                       │
+           ┌───────────┼───────────┐
+           ▼           ▼           ▼
+       build_dag   beam_search   finalize
+           │           │           │
+           ▼           ▼           ▼
+         Trie      PathState    UserFreq
+     (前缀匹配)   (最优路径)    (词频提升)
+                                    │
+                                    ▼
+                              BilingualIndex
+                              (中英注释)
 ```
 
 ### 模块说明
 
 | 模块 | 文件 | 职责 |
 |------|------|------|
-| Engine | `src/engine.rs` | 引擎入口，协调各组件 |
-| Context | `src/context.rs` | 共享上下文：raw_input → candidates |
-| Pipeline | `src/pipeline.rs` | 核心管线：DAG → Beam Search → 候选生成 |
-| Trie | `src/trie.rs` | Trie 数据结构，高效前缀匹配 |
-| Segmentor | `src/segmentor.rs` | 使用 Trie 构建拼音 DAG |
+| Engine | `src/engine.rs` | 引擎入口，持有 Pipeline + UserFreq + candidates |
+| Pipeline | `src/pipeline.rs` | 核心管线：DAG 构建 → Beam Search → 回溯 → 候选生成 |
+| Trie | `src/trie.rs` | 泛型 `Trie<V>`，O(n×m) 前缀匹配 |
 | Dict | `src/dict.rs` | 词典加载，构建拼音/英文/中英 Trie |
 | DictCompiler | `src/dict_compiler.rs` | 二进制词典缓存（ZIRC 格式） |
 | Schema | `src/schema.rs` | YAML Schema 解析 |
@@ -138,7 +129,7 @@ hello	hello	100
 | 评分 | log(weight) + quality_len + 上下文 | log(weight) + 分段惩罚 + 用户频次 |
 | 用户学习 | 事务型 UserDict + 时间衰减 | 简单计数 TSV |
 | 模糊拼音 | Speller Algebra（编译时展开） | 未实现 |
-| 依赖 | boost, yaml-cpp, leveldb 等 | hashbrown + smallvec |
+| 依赖 | boost, yaml-cpp, leveldb 等 | 零外部依赖 |
 
 ## License
 
