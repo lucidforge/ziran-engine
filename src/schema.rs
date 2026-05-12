@@ -3,6 +3,7 @@ use std::fs;
 pub struct SchemaConfig {
     pub dictionaries: Vec<String>,
     pub english_dictionaries: Vec<String>,
+    pub bilingual_dictionaries: Vec<String>,
 }
 
 impl SchemaConfig {
@@ -12,6 +13,7 @@ impl SchemaConfig {
 
         let mut dictionaries = Vec::new();
         let mut english_dictionaries = Vec::new();
+        let mut bilingual_dictionaries = Vec::new();
         let mut current_section = String::new();
         let mut current_list = String::new();
 
@@ -57,6 +59,10 @@ impl SchemaConfig {
                     && current_list == "english_dictionaries"
                 {
                     english_dictionaries.push(item.to_string());
+                } else if current_section == "translator"
+                    && current_list == "bilingual_dictionaries"
+                {
+                    bilingual_dictionaries.push(item.to_string());
                 }
             }
         }
@@ -68,6 +74,7 @@ impl SchemaConfig {
         Ok(Self {
             dictionaries,
             english_dictionaries,
+            bilingual_dictionaries,
         })
     }
 }

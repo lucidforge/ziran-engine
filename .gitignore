@@ -5,3 +5,10 @@ Cargo.lock
 # Dictionary files (large, download separately)
 data/*.txt
 data/*.yaml
+
+# Generated/user data
+data/user_freq.tsv
+data/cache_*.bin
+
+# macOS
+.DS_Store

@@ -6,96 +6,87 @@
 
 ## 特性
 
-### 已实现
-
-- [x] 模块化架构：Engine / Context / Pipeline / Segmentor / Translator
-- [x] 拼音自动切分（DP 最优匹配，考虑词库权重）
-- [x] 多词表加载（base、ext、others、en、en_ext）
-- [x] 短语优先匹配 + 单字组合生成
-- [x] 英文单词输入
-- [x] 候选排序（按词库权重降序）
-- [x] 未匹配词原样输出
-
-### 已知问题
-
-DP 切分在个别场景下会选错。比如 `zhongguo` → "中过"而非"中国"，原因是单字权重（`中` 768万 + `过` 730万）远高于二字词（`中国` 50万），DP 贪心选了大权重路径。这个问题需要在 DP 评分函数里加入词长惩罚或平滑因子，让短语比单字组合更优先。
-
-### 计划中
-
-- [ ] 修复 DP 评分函数（词长惩罚）
-- [ ] Trie 前缀匹配 / 输入时补全
-- [ ] 用户词频学习
-- [ ] Bigram / N-gram 语言模型
-- [ ] 多音字消歧
-- [ ] 单元测试覆盖
-- [ ] IMKit / TSF / Fcitx 前端对接
+- **Trie 前缀匹配** — 拼音和英文均使用 Trie 数据结构，DAG 构建 O(n×m)
+- **Beam Search 最优切分** — 对数权重评分 + 分段惩罚，词组优先于单字组合
+- **多词表加载** — 中文基础/扩展词库 + 英文词库，二进制缓存加速启动
+- **中英混合输入** — 拼音输入时候选栏显示英文翻译注释
+- **英文前缀匹配** — 输入英文时显示前缀匹配候选
+- **用户词频学习** — 本地记录选词偏好，高频词自动提升排序
+- **零外部依赖** — 仅使用 Rust 标准库（hashbrown + smallvec）
 
 ## 快速开始
-
-### 环境要求
-
-- Rust 1.70+
-- Cargo
-
-### 编译运行
 
 ```bash
 cargo build
 cargo run
 ```
 
+### 词库准备
+
+词库文件需要放在 `data/` 目录下（已被 .gitignore 排除）：
+
+| 文件 | 说明 |
+|------|------|
+| `base.dict.yaml` | 基础词库（两字词为主） |
+| `ext.dict.yaml` | 扩展词库（多音字注音、长词） |
+| `others.dict.yaml` | 容错词库（口语读音、异读） |
+| `en.dict.yaml` | 英文词库（~20k 单词） |
+| `en_ext.dict.yaml` | 英文扩展（缩写、互联网术语） |
+| `bilingual.dict.yaml` | 中英对照词典（中文→英文翻译） |
+| `default.yaml` | Schema 配置，声明加载哪些词表 |
+
+从 [雾凇拼音](https://github.com/iDvel/rime-ice) 下载词库文件。
+
 ### 示例交互
 
 ```
-输入拼音，例如: nihao，然后回车。输入 empty 退出。
 > nihao
-原始输入: nihao
 候选结果:
-  1. 你好
+  1. 你好 (hello)
   2. 拟好
 
 > shijie
-原始输入: shijie
 候选结果:
-  1. 世界
+  1. 世界 (world)
   2. 时节
   3. 师姐
-  4. 视界
   ...
 
+> beijing
+候选结果:
+  1. 北京
+  2. 背景
+
 > hello
-原始输入: hello
 候选结果:
   1. hello
+  2. hello
+
+输入数字选择候选，选词记录会自动保存到 data/user_freq.tsv。
 ```
 
-## 架构设计
+## 架构
 
 ```
 用户输入
     │
     ▼
 ┌─────────────┐
-│   Engine    │  引擎入口，管理 Context 和 Pipeline
+│   Engine    │  引擎入口，管理 Context + Pipeline + UserFreq
 └──────┬──────┘
        │
        ▼
-┌─────────────┐
-│  Context    │  共享上下文：raw_input → segments → candidates
-└──────┬──────┘
+┌─────────────┐     ┌──────────────┐
+│  Pipeline   │────▶│    Trie      │  DAG 构建 + Beam Search
+└──────┬──────┘     └──────────────┘
        │
        ▼
 ┌─────────────┐     ┌──────────────┐     ┌──────────────┐
-│  Pipeline   │────▶│  Segmentor   │────▶│ Translator   │
+│  Segmentor  │────▶│  Bilingual   │────▶│  UserFreq    │
 └─────────────┘     └──────────────┘     └──────┬───────┘
                                                 │
                                                 ▼
-                                         ┌──────────────┐
-                                         │   Sort       │
-                                         └──────┬───────┘
-                                                │
-                                                ▼
-                                         候选列表输出
+                                          候选列表输出
 ```
 
 ### 模块说明
@@ -103,77 +94,51 @@ cargo run
 | 模块 | 文件 | 职责 |
 |------|------|------|
 | Engine | `src/engine.rs` | 引擎入口，协调各组件 |
-| Context | `src/context.rs` | 共享上下文，存储输入、分段、候选 |
-| Pipeline | `src/pipeline.rs` | 处理管线，串联分段→翻译→排序 |
-| Segmentor | `src/segmentor.rs` | 拼音分段器（DP 最优匹配） |
-| Translator | `src/translator.rs` | 翻译器，多词表索引 + 短语优先 + 组合生成 |
-| Segment | `src/segment.rs` | 分段数据结构 |
-| Candidate | `src/candidate.rs` | 候选词数据结构 |
+| Context | `src/context.rs` | 共享上下文：raw_input → candidates |
+| Pipeline | `src/pipeline.rs` | 核心管线：DAG → Beam Search → 候选生成 |
+| Trie | `src/trie.rs` | Trie 数据结构，高效前缀匹配 |
+| Segmentor | `src/segmentor.rs` | 使用 Trie 构建拼音 DAG |
+| Dict | `src/dict.rs` | 词典加载，构建拼音/英文/中英 Trie |
+| DictCompiler | `src/dict_compiler.rs` | 二进制词典缓存（ZIRC 格式） |
+| Schema | `src/schema.rs` | YAML Schema 解析 |
+| UserFreq | `src/user_freq.rs` | 用户词频记录（本地 TSV） |
+| Candidate | `src/candidate.rs` | 候选词结构体（text + score + annotation） |
 
-## 词库
+## 词典格式
 
-词库数据来源于 [雾凇拼音 (rime-ice)](https://github.com/iDvel/rime-ice)，存放于 `data/` 目录：
-
-| 文件 | 说明 |
-|------|------|
-| `base.dict.yaml` | base 基础词库（两字词为主） |
-| `ext.dict.yaml` | 扩展词库（多音字注音、长词） |
-| `others.dict.yaml` | 容错词库（口语读音、异读） |
-| `en.dict.yaml` | 英文词库（~20k 单词） |
-| `en_ext.dict.yaml` | 英文扩展（缩写、互联网术语） |
-
-> `tencent.dict.yaml`（腾讯词向量）因无拼音注音，暂未加载。
-
-### 词库格式（中文）
-
-Tab 分隔三列：
+### 中文词典（Tab 分隔）
 
 ```
 词语	拼音1 拼音2 ...	权重
+你好	ni hao	332885
 ```
 
-### 词库格式（英文）
-
-Tab 分隔两列：
+### 英文词典（Tab 分隔）
 
 ```
-单词	单词
+单词	编码	权重
+hello	hello	100
 ```
 
-## 与 librime 的关系
+### 中英对照词典（Tab 分隔）
 
-本项目架构设计灵感来源于 [librime](https://github.com/rime/librime)，采用 Rust 重新实现。
+```
+中文	英文	权重
+你好	hello	100
+世界	world	100
+```
 
-与 librime 的差异：
+## 与 librime 的对比
 
 | 维度 | librime | ziran-engine |
 |------|---------|--------------|
 | 语言 | C++ | Rust |
-| 定位 | 生产级输入法引擎 | 学习/实验性质 |
-| 架构 | 复杂插件系统 | 极简模块化 |
-| 依赖 | boost, yaml-cpp, leveldb 等 | 零外部依赖 |
-
-## 路线图
-
-### Phase 1：核心引擎完善（当前阶段）
-
-- [x] 拼音自动切分
-- [x] 多词表加载
-- [x] DP 最优切分（基础版，有已知评分函数问题待修复）
-- [ ] 修复 DP 评分函数
-
-### Phase 2：工程化
-
-- [ ] 单元测试
-- [ ] 日志系统
-- [ ] 配置文件
-
-### Phase 3：前端对接
-
-- [ ] 命令行交互优化（逐键输入、退格、选词）
-- [ ] IMKit (macOS)
-- [ ] TSF (Windows)
-- [ ] Fcitx/IBus (Linux)
+| 词典格式 | 二进制 mmap（.table.bin + .prism.bin） | YAML 文本 + 二进制缓存 |
+| 拼音切分 | SyllableGraph（Double-Array Trie） | Trie DAG + Beam Search |
+| 评分 | log(weight) + quality_len + 上下文 | log(weight) + 分段惩罚 + 用户频次 |
+| 用户学习 | 事务型 UserDict + 时间衰减 | 简单计数 TSV |
+| 模糊拼音 | Speller Algebra（编译时展开） | 未实现 |
+| 依赖 | boost, yaml-cpp, leveldb 等 | hashbrown + smallvec |
 
 ## License
 

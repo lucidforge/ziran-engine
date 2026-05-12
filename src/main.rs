@@ -1,12 +1,14 @@
 mod candidate;
 mod context;
 mod dict;
+mod dict_compiler;
 mod engine;
 mod pipeline;
 mod schema;
 mod segment;
 mod segmentor;
-mod translator;
+mod trie;
+mod user_freq;
 
 use engine::Engine;
 use std::io::{self, Write};
@@ -14,7 +16,7 @@ use std::io::{self, Write};
 fn main() {
     let mut engine = Engine::new();
 
-    println!("输入拼音，例如: nihao，然后回车。输入 empty 退出。");
+    println!("输入拼音，例如: nihao，然后回车。输入数字选择候选。输入 empty 退出。");
 
     loop {
         print!("> ");
@@ -29,14 +31,32 @@ fn main() {
             break;
         }
 
+        // Check if input is a number (candidate selection)
+        if let Ok(idx) = input.parse::<usize>() {
+            if idx >= 1 && idx <= engine.context.candidates.len() {
+                let selected_text = engine.context.candidates[idx - 1].text.clone();
+                println!("已选择: {}", selected_text);
+                engine.record_selection(&selected_text);
+            } else {
+                println!("无效选择");
+            }
+            println!();
+            continue;
+        }
+
         engine.context.raw_input = input.clone();
         engine.run_pipeline();
 
         println!("原始输入: {}", input);
         println!("候选结果:");
         for (i, cand) in engine.context.candidates.iter().enumerate() {
-            println!("  {}. {}", i + 1, cand.text);
+            match &cand.annotation {
+                Some(ann) => println!("  {}. {} ({})", i + 1, cand.text, ann),
+                None => println!("  {}. {}", i + 1, cand.text),
+            }
         }
         println!();
     }
+
+    engine.save_user_freq();
 }
